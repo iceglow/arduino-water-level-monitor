@@ -3,8 +3,11 @@
 #define ONBOARD_LED 13
 #define FLEX_SENSOR 0
 
-int bend_value  = 0;
-byte bend_state = 0;
+#define STATE_NORMAL  0
+#define STATE_WARNING 1
+#define STATE_ALERT   2
+
+byte bendState = STATE_NORMAL;
 
 void setup()
 {
@@ -14,66 +17,79 @@ void setup()
   pinMode(ONBOARD_LED, OUTPUT);
 }
 
-void SendWaterNormal(int bend_value, int bend_state)
+int getBendValue()
+{
+  // poll FLEX_SENSOR voltage
+  return analogRead(FLEX_SENSOR);
+}
+
+void SendWaterNormal(int bendValue)
 {
   digitalWrite(ONBOARD_LED, LOW);
-  Serial.print("Water Level Returned To Normal bend_value=");
-  Serial.println(bend_value);
+  Serial.print("Water Level Returned To Normal bendValue=");
+  Serial.println(bendValue);
 }
 
-void SendWaterWarning(int bend_value, int bend_state)
+void SendWaterWarning(int bendValue)
 {
   digitalWrite(ONBOARD_LED, HIGH);
-  Serial.print("Water Level Warning bend_value=");
-  Serial.println(bend_value);
+  Serial.print("Water Level Warning bendValue=");
+  Serial.println(bendValue);
 }
 
-void SendWaterAlert(int bend_value, int bend_state)
+void SendWaterAlert(int bendValue)
 {
   digitalWrite(ONBOARD_LED, HIGH);
-  Serial.print("Water Level Alert bend_value=");
-  Serial.println(bend_value);
+  Serial.print("Water Level Alert bendValue=");
+  Serial.println(bendValue);
+}
+
+byte getBendState(int bendValue, byte currentState)
+{
+  byte newState = currentState;
+
+  switch (currentState)
+  {
+    case STATE_NORMAL: // bendValue does not exceed high or low values
+      if (bendValue <= FLEX_LEVEL_WARNING)
+      {
+        newState = STATE_WARNING;
+        SendWaterWarning(bendValue, newState);
+      }
+      break;
+    case STATE_WARNING: // bendValue exceeds high or low values
+      if (bendValue <= FLEX_LEVEL_ALERT)
+      {
+        newState = STATE_ALERT;
+        SendWaterAlert(bendValue, newState);
+      }
+      else if (bendValue > FLEX_LEVEL_WARNING)
+      {
+        newState = STATE_NORMAL;
+        SendWaterNormal(bendValue, newState);
+      }
+      break;
+    case STATE_ALERT:
+      if (bendValue > FLEX_LEVEL_ALERT) {
+        newState = STATE_WARNING;
+        SendWaterWarning(bendValue, newState);
+      }
+      break;
+  }
+
+  return newState;
 }
 
 void loop()
 {
   // wait a second each loop iteration
   delay(1000);
-  // poll FLEX_SENSOR voltage
-  bend_value = analogRead(FLEX_SENSOR);
+
+  int bendValue = getBendValue();
 
   // print bend_value to the serial port for baseline measurement
-  // comment this out once baseline, upper and lower threshold
-  // limits have been defined
   Serial.print("bend_value=");
-  Serial.println(bend_value);
+  Serial.println(bendValue);
 
-  switch (bend_state)
-  {
-    case 0: // bend_value does not exceed high or low values
-      if (bend_value <= FLEX_LEVEL_WARNING)
-      {
-        bend_state = 1;
-        SendWaterWarning(bend_value, bend_state);
-      }
-      break;
-    case 1: // bend_value exceeds high or low values
-      if (bend_value <= FLEX_LEVEL_ALERT)
-      {
-        bend_state = 2;
-        SendWaterAlert(bend_value, bend_state);
-      }
-      else if (bend_state > FLEX_LEVEL_WARNING)
-      {
-        bend_state = 0;
-        SendWaterNormal(bend_value, bend_state);
-      }
-      break;
-    case 2:
-      if (bend_state > FLEX_LEVEL_ALERT) {
-        bend_state = 1;
-        SendWaterWarning(bend_value, bend_state);
-      }
-      break;
-  }
+  bendState = getBendState(bendValue, bendState);
 }
