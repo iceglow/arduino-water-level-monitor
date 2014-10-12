@@ -154,8 +154,8 @@ byte getBendState(int bendValue, byte currentState)
   return newState;
 }
 
-String getBendStateString() {
-  switch (bendState) {
+String getBendStateString(byte state) {
+  switch (state) {
     case STATE_NORMAL:
       return "NORMAL";
     case STATE_WARNING:
@@ -167,67 +167,104 @@ String getBendStateString() {
   }
 }
 
-void handleRequest() {
-  Serial.println("Got request:");
-  Serial.println(buf);
+String getRequestURI(String request) {
+  int uriStart = request.indexOf(' ') + 1;
+  int uriEnd = request.lastIndexOf(' ');
 
-  String json = "{\"state\":\"" + getBendStateString() + "\", \"value\":" + String(getBendValue()) + "}";
-  int jsonLen = json.length()+1;
-  char jsonArr[jsonLen];
-  json.toCharArray(jsonArr, jsonLen);
+  String uri = "";
+  
+  if (uriStart > 0) {
+    if (uriEnd <= uriStart) {
+      uriEnd = request.length();
+    }
+    uri = request.substring(uriStart, uriEnd);
+  }
+
+  return uri;
+}
+
+void handleRequest(String request) {
+  Serial.println("Request: " + String(buf));
+  
+  String uri = getRequestURI(request);
+  String value = String(getBendValue());
+  String state = getBendStateString(bendState);
+  
+  if (uri == "/state") {
+    sendResponse(state);
+  } else if (uri == "/value") {
+    sendResponse(value);
+  } else if (uri == "/") {
+    sendResponse("{\"state\":\"" + state + "\", \"value\":" + value + "}");
+  } else {
+    Serial.println("UNKNOWN URI: " + uri);
+    send404();
+  }
+}
+
+/**
+ * Send 200 OK and response body
+ */
+void sendResponse(String response) {
+  int retLen = response.length()+1;
+  char retArr[retLen];
+  response.toCharArray(retArr, retLen);
 
   wifly.println(F("HTTP/1.1 200 OK"));
   wifly.println(F("Content-Type: application/json;charset=utf-8"));
   wifly.println(F("Transfer-Encoding: chunked"));
   wifly.println();
-  wifly.sendChunkln(jsonArr);
+  wifly.sendChunkln(retArr);
   wifly.sendChunkln();
 
   wifly.flushRx();
 }
 
-/** Send a 404 error */
+/**
+ * Send a 404 error
+ */
 void send404() {
-    Serial.println(F("Sending 404"));
-    wifly.println(F("HTTP/1.1 404 Not Found"));
-    wifly.println(F("Content-Type: text/html"));
-    wifly.println(F("Transfer-Encoding: chunked"));
-    wifly.println();
-    wifly.sendChunkln(F("<html><head>"));
-    wifly.sendChunkln(F("<title>404 Not Found</title>"));
-    wifly.sendChunkln(F("</head><body>"));
-    wifly.sendChunkln(F("<h1>Not Found</h1>"));
-    wifly.sendChunkln(F("<hr>"));
-    wifly.sendChunkln(F("</body></html>"));
-    wifly.sendChunkln();
+  Serial.println(F("Sending 404"));
+  wifly.println(F("HTTP/1.1 404 Not Found"));
+  wifly.println(F("Content-Type: text/html"));
+  wifly.println(F("Transfer-Encoding: chunked"));
+  wifly.println();
+  wifly.sendChunkln(F("<html><head>"));
+  wifly.sendChunkln(F("<title>404 Not Found</title>"));
+  wifly.sendChunkln(F("</head><body>"));
+  wifly.sendChunkln(F("<h1>Not Found</h1>"));
+  wifly.sendChunkln(F("<hr>"));
+  wifly.sendChunkln(F("</body></html>"));
+  wifly.sendChunkln();
+  wifly.flushRx();		// discard rest of input
 }
 
 void loop() {
-  // wait a second each loop iteration
-  delay(1000);
+  // wait 10ms each loop iteration
+  delay(10);
 
   int bendValue = getBendValue();
-
-  // print bend_value to the serial port for baseline measurement
-  Serial.print("bend_value=");
-  Serial.println(bendValue);
-
-  bendState = getBendState(bendValue, bendState);
+  byte newState = getBendState(bendValue, bendState);
+  
+  if (newState != bendState) {
+    Serial.println("State changed from " + getBendStateString(bendState) + " to " + getBendStateString(newState));
+    
+    bendState = newState;
+  }
 
   // WiFly is available
   if (wifly.available() > 0) {
 
     /* See if there is a request */
-  	if (wifly.gets(buf, sizeof(buf))) {
-  	  if (strncmp_P(buf, PSTR("GET / "), 6) == 0 || strncmp_P(buf, PSTR("POST / "), 7) == 0) {
-        handleRequest();
+    if (wifly.gets(buf, sizeof(buf))) {
+      if (strncmp_P(buf, PSTR("GET "), 4) == 0 || strncmp_P(buf, PSTR("POST "), 5) == 0) {
+        handleRequest(String(buf));
       } else {
         /* Unexpected request */
         Serial.print(F("Unexpected: "));
         Serial.println(buf);
-        wifly.flushRx();		// discard rest of input
         send404();
-  	  }
-  	}
+      }
+    }
   }
 }
